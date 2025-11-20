@@ -13,6 +13,7 @@ Best of all, it's safe by default - all errors are raised unless you explicitly 
 ### When to Use This Pattern
 
 ✅ **Good for:**
+
 - API clients with varying error tolerance
 - Batch processing where some failures are acceptable
 - Verification operations (checking if resources exist)
@@ -21,6 +22,7 @@ Best of all, it's safe by default - all errors are raised unless you explicitly 
 - Multi-service orchestration where partial failures are OK
 
 ❌ **Not ideal for:**
+
 - Critical operations where all errors must be handled explicitly
 - Debugging scenarios where you need full error details
 - Simple scripts with straightforward error handling
