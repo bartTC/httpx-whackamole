@@ -4,6 +4,7 @@ from http import HTTPStatus
 
 import httpx
 import pytest
+from pytest_httpx import HTTPXMock
 
 from whackamole import ErrorPolicy, HttpxWhackamole
 
@@ -281,3 +282,62 @@ def test_verification_policy(error_type: str) -> None:
                 msg, request=response.request, response=response
             )
         assert not handler.error_occurred
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INTEGRATION TESTS WITH raise_for_status()
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_realistic_usage_with_raise_for_status(httpx_mock: HTTPXMock) -> None:
+    """Test realistic usage pattern with raise_for_status()."""
+    # Mock successful response
+    httpx_mock.add_response(status_code=200, json={"data": "success"})
+
+    # Only raise auth and rate-limit errors
+    policy = ErrorPolicy(
+        raise_for_status=(HTTPStatus.UNAUTHORIZED, HTTPStatus.TOO_MANY_REQUESTS)
+    )
+
+    with HttpxWhackamole(policy=policy) as handler:
+        response = httpx.get("https://api.example.com/data")
+        response.raise_for_status()
+        if not handler.error_occurred:
+            result = response.json()
+
+    assert not handler.error_occurred
+    assert result == {"data": "success"}
+
+
+def test_realistic_usage_suppresses_transient_errors(httpx_mock: HTTPXMock) -> None:
+    """Test that transient errors (404, 500) are suppressed."""
+    # Mock 404 response
+    httpx_mock.add_response(status_code=404)
+
+    policy = ErrorPolicy(
+        raise_for_status=(HTTPStatus.UNAUTHORIZED, HTTPStatus.TOO_MANY_REQUESTS)
+    )
+
+    result = None
+    with HttpxWhackamole(policy=policy) as handler:
+        response = httpx.get("https://api.example.com/missing")
+        response.raise_for_status()
+        if not handler.error_occurred:
+            result = response.json()
+
+    assert handler.error_occurred
+    assert result is None
+
+
+def test_realistic_usage_raises_critical_errors(httpx_mock: HTTPXMock) -> None:
+    """Test that critical errors (401, 429) are raised."""
+    # Mock 401 response
+    httpx_mock.add_response(status_code=401)
+
+    policy = ErrorPolicy(
+        raise_for_status=(HTTPStatus.UNAUTHORIZED, HTTPStatus.TOO_MANY_REQUESTS)
+    )
+
+    with pytest.raises(httpx.HTTPStatusError), HttpxWhackamole(policy=policy):
+        response = httpx.get("https://api.example.com/protected")
+        response.raise_for_status()

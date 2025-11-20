@@ -48,12 +48,14 @@ from whackamole import HttpxWhackamole, ErrorPolicy
 # Default policy: Raise all errors (safe by default)
 with HttpxWhackamole() as handler:
     response = httpx.get("https://api.example.com/data")
+    response.raise_for_status()
     # All errors will be raised unless you specify a policy
 
 # To suppress specific errors, use a custom policy
 policy = ErrorPolicy.raise_all_except(HTTPStatus.NOT_FOUND)
 with HttpxWhackamole(policy=policy) as handler:
     response = httpx.get("https://api.example.com/data")
+    response.raise_for_status()
     # Only 404 errors will be suppressed
 
 if handler.error_occurred:
@@ -75,6 +77,8 @@ def sync_remote_files(file_ids: list[str]) -> dict[str, bool]:
     for file_id in file_ids:  # e.g., 50,000 files
         with HttpxWhackamole(policy=policy) as handler:
             response = httpx.get(f"https://api.example.com/files/{file_id}")
+            response.raise_for_status()
+            
             if not handler.error_occurred:
                 process_file(response.json())
                 results[file_id] = True
@@ -90,89 +94,51 @@ def sync_remote_files(file_ids: list[str]) -> dict[str, bool]:
 
 ### Comparison: Vanilla httpx vs HttpxWhackamole
 
-#### Vanilla httpx (verbose and error-prone)
+#### Vanilla httpx
 
 ```python
 import httpx
 from http import HTTPStatus
 
 def fetch_data(url: str):
-    """Fetch data with complex error handling using vanilla httpx."""
+    """Fetch data, raising only auth and rate-limit errors."""
     try:
-        response = httpx.get(url)
+        response = httpx.get(url, timeout=30.0)
         response.raise_for_status()
         return response.json()
     except httpx.HTTPStatusError as e:
-        # Handle specific HTTP status codes differently
-        if e.response.status_code == HTTPStatus.NOT_FOUND:
-            # 404 is expected, return None
-            return None
-        elif e.response.status_code == HTTPStatus.UNAUTHORIZED:
-            # Auth errors should bubble up
-            raise
+        # Only raise critical errors, suppress everything else
+        if e.response.status_code == HTTPStatus.UNAUTHORIZED:
+            raise  # Auth failure - must be fixed immediately
         elif e.response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
-            # Rate limiting needs special handling
-            raise
-        elif e.response.status_code >= 500:
-            # Server errors might be transient, log but don't fail
-            print(f"Server error: {e}")
-            return None
+            raise  # Rate limit - needs backoff logic
         else:
-            # Other 4xx client errors, suppress
+            # All other status codes (404, 500, etc.) - suppress
             return None
-    except httpx.ConnectTimeout:
-        # Network timeout, might be transient
-        print("Connection timeout")
+    except httpx.RequestError:
+        # Network errors, timeouts, protocol errors - all transient, suppress
         return None
-    except httpx.ReadTimeout:
-        # Read timeout, might be transient
-        print("Read timeout")
-        return None
-    except httpx.RequestError as e:
-        # Other network errors
-        print(f"Network error: {e}")
-        return None
+    except ...:
+        raise
 ```
 
-#### With HttpxWhackamole (clean and declarative)
+#### With HttpxWhackamole
 
 ```python
 import httpx
 from http import HTTPStatus
 from whackamole import HttpxWhackamole, ErrorPolicy
 
+# Central policy. Raise only critical errors.
+policy = ErrorPolicy(
+    raise_for_status=(HTTPStatus.UNAUTHORIZED, HTTPStatus.TOO_MANY_REQUESTS)
+)
+    
 def fetch_data(url: str):
-    """Fetch data with equivalent error handling using HttpxWhackamole."""
-    # Same behavior: raise auth/rate-limit errors, suppress others
-    policy = ErrorPolicy(
-        raise_for_status=(
-            HTTPStatus.UNAUTHORIZED,      # Raise: Auth failure
-            HTTPStatus.TOO_MANY_REQUESTS  # Raise: Rate limiting
-        )
-    )
-
+    """Fetch data, raising only auth and rate-limit errors."""
     with HttpxWhackamole(policy=policy) as handler:
         response = httpx.get(url)
-        if handler.error_occurred:
-            # Log if it was a server error (optional)
-            if isinstance(response, httpx.Response) and response.status_code >= 500:
-                print(f"Server error: {response.status_code}")
-            return None
-        return response.json()
-```
-
-#### Even simpler if you don't need logging:
-
-```python
-def fetch_data(url: str):
-    """Simplified version without logging."""
-    # Raise only critical errors
-    policy = ErrorPolicy(
-        raise_for_status=(HTTPStatus.UNAUTHORIZED, HTTPStatus.TOO_MANY_REQUESTS)
-    )
-
-    with HttpxWhackamole(policy=policy) as handler:
-        response = httpx.get(url)
+        response.raise_for_status()
         return None if handler.error_occurred else response.json()
 ```
 
@@ -208,6 +174,7 @@ By default, all errors are raised to ensure no errors are accidentally suppresse
 ```python
 with HttpxWhackamole() as handler:
     response = httpx.get(url)
+    response.raise_for_status()
     # All HTTP and network errors will be raised
 ```
 
@@ -218,6 +185,7 @@ To suppress non-critical errors and only raise critical ones:
 policy = ErrorPolicy(raise_for_status=(HTTPStatus.UNAUTHORIZED, HTTPStatus.TOO_MANY_REQUESTS))
 with HttpxWhackamole(policy=policy) as handler:
     response = httpx.get(url)
+    response.raise_for_status()
     # 500, 503, network errors, etc. are suppressed
 ```
 
@@ -231,6 +199,7 @@ policy = ErrorPolicy.raise_all_except(HTTPStatus.NOT_FOUND)
 
 with HttpxWhackamole(policy=policy) as handler:
     response = httpx.get(url)
+    response.raise_for_status()
 
 if handler.error_occurred:
     # File doesn't exist (404) - expected case
@@ -255,6 +224,7 @@ policy = ErrorPolicy(
 
 with HttpxWhackamole(policy=policy) as handler:
     response = httpx.post(url, json=data)
+    response.raise_for_status()
 ```
 
 ### 4. Inverted Mode (Multiple Suppressions)
@@ -271,6 +241,7 @@ policy = ErrorPolicy.raise_all_except(
 
 with HttpxWhackamole(policy=policy) as handler:
     response = httpx.get(url)
+    response.raise_for_status()
 ```
 
 ## Real-World Examples
@@ -289,6 +260,7 @@ async def fetch_with_retry(url: str, max_retries: int = 3):
         with HttpxWhackamole(policy=policy) as handler:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url)
+                response.raise_for_status()
                 if not handler.error_occurred:
                     return response.json()
 
@@ -308,6 +280,7 @@ def verify_remote_file_exists(url: str) -> bool:
 
     with HttpxWhackamole(policy=policy) as handler:
         response = httpx.head(url)
+        response.raise_for_status()
         return not handler.error_occurred
 ```
 
@@ -323,6 +296,7 @@ def process_urls(urls: list[str]) -> dict[str, Any]:
     for url in urls:
         with HttpxWhackamole(policy=policy) as handler:
             response = httpx.get(url)
+            response.raise_for_status()
             if not handler.error_occurred:
                 results[url] = response.json()
             else:

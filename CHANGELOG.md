@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Improved README comparison example to show realistic vanilla httpx error handling
+- Updated all documentation examples to include `response.raise_for_status()` calls
+- Refactored test suite to use `pytest.mark.parametrize` for better maintainability
+
+### Added
+- Added integration tests demonstrating realistic usage patterns with `raise_for_status()`
+- Added version comparison links to CHANGELOG for easier navigation
+
 ## [1.0.0] - 2025-11-20
 
 ### Added
