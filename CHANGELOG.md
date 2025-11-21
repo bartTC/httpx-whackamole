@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2025-11-21
+
 ### Added
 - **Callback support**: Execute custom code on errors or successful requests
   - `ErrorContext` dataclass providing exception, request, response, and suppression status
@@ -48,5 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Simple API**: Single context manager with policy object
 - **Production ready**: Battle-tested in production environments
 
-[Unreleased]: https://github.com/bartTC/httpx-whackamole/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/bartTC/httpx-whackamole/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/bartTC/httpx-whackamole/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bartTC/httpx-whackamole/commits/v1.0.0

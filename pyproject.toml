@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "httpx-whackamole"
-version = "1.0.0"
+version = "1.1.0"
 description = "Policy-based error handling for httpx HTTP operations"
 readme = "README.md"
 requires-python = ">=3.9"

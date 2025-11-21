@@ -16,7 +16,7 @@ import httpx
 if TYPE_CHECKING:
     from http import HTTPStatus
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = ["ErrorContext", "ErrorPolicy", "HttpxWhackamole"]
 
 
