@@ -7,14 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Callback support**: Execute custom code on errors or successful requests
+  - `ErrorContext` dataclass providing exception, request, response, and suppression status
+  - `on_error` callback invoked for all HTTP errors (both suppressed and raised)
+  - `on_success` callback invoked when no error occurs
+  - Support for callbacks via subclassing (define `on_error`/`on_success` methods)
+  - Support for callbacks via `__init__` parameters
+  - Useful for integrating error tracking (Sentry), logging, and observability
+- Added integration tests demonstrating realistic usage patterns with `raise_for_status()`
+- Added version comparison links to CHANGELOG for easier navigation
+- Added comprehensive callback tests (8 new test cases)
+
 ### Changed
 - Improved README comparison example to show realistic vanilla httpx error handling
 - Updated all documentation examples to include `response.raise_for_status()` calls
 - Refactored test suite to use `pytest.mark.parametrize` for better maintainability
-
-### Added
-- Added integration tests demonstrating realistic usage patterns with `raise_for_status()`
-- Added version comparison links to CHANGELOG for easier navigation
+- Updated API documentation with callback usage patterns
 
 ## [1.0.0] - 2025-11-20
 

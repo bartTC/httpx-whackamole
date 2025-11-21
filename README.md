@@ -145,7 +145,7 @@ def fetch_data(url: str):
 ### API Overview
 
 ```python
-from whackamole import HttpxWhackamole, ErrorPolicy
+from whackamole import HttpxWhackamole, ErrorPolicy, ErrorContext
 from http import HTTPStatus
 
 # The handler is a context manager with one attribute
@@ -165,6 +165,18 @@ ErrorPolicy.raise_all_except(404, 503)  # Returns policy that suppresses only th
 # Or create custom policies
 ErrorPolicy(raise_for_status=(401, 429))  # Explicit mode: raise only these
 ErrorPolicy(raise_for_status="all", suppress_for_status=(404,))  # Same as raise_all_except
+
+# Optional: Add callbacks for error tracking (e.g., Sentry)
+def on_error(ctx: ErrorContext):
+    sentry_sdk.capture_exception(ctx.exception)
+
+with HttpxWhackamole(policy=policy, on_error=on_error) as handler:
+    response = httpx.get(...)
+
+# Or use subclassing for reusable configurations
+class SentryWhackamole(HttpxWhackamole):
+    def on_error(self, ctx: ErrorContext):
+        sentry_sdk.capture_exception(ctx.exception)
 ```
 
 ### 1. Default Policy (Safe by Default)
@@ -304,6 +316,80 @@ def process_urls(urls: list[str]) -> dict[str, Any]:
 
     return results
 ```
+
+## Custom Error Handling with Callbacks
+
+Execute custom code on errors or successful requests using callbacks. This is particularly useful for integrating error tracking services like Sentry, logging metrics, or adding custom observability.
+
+### Sentry Integration Example
+
+**Approach 1: Using Subclassing (Recommended)**
+
+```python
+import sentry_sdk
+from whackamole import HttpxWhackamole, ErrorContext, ErrorPolicy
+
+class SentryWhackamole(HttpxWhackamole):
+    """Handler that automatically sends errors to Sentry."""
+
+    def on_error(self, ctx: ErrorContext):
+        """Send errors to Sentry with appropriate severity."""
+        level = "warning" if ctx.was_suppressed else "error"
+        sentry_sdk.capture_exception(ctx.exception, level=level)
+
+    def on_success(self):
+        """Track successful requests (optional)."""
+        sentry_sdk.add_breadcrumb(category="http", message="Request succeeded")
+
+# Use it just like HttpxWhackamole
+policy = ErrorPolicy(raise_for_status=(HTTPStatus.UNAUTHORIZED,))
+with SentryWhackamole(policy=policy) as handler:
+    response = httpx.get(url)
+    response.raise_for_status()
+```
+
+**Approach 2: Using Callback Functions**
+
+```python
+def send_to_sentry(ctx: ErrorContext):
+    """Send error to Sentry with appropriate severity level."""
+    if ctx.was_suppressed:
+        # Non-critical error - log as warning
+        sentry_sdk.capture_exception(ctx.exception, level="warning")
+    else:
+        # Critical error - log as error
+        sentry_sdk.capture_exception(ctx.exception, level="error")
+
+policy = ErrorPolicy(raise_for_status=(HTTPStatus.UNAUTHORIZED,))
+with HttpxWhackamole(policy=policy, on_error=send_to_sentry) as handler:
+    response = httpx.get(url)
+    response.raise_for_status()
+```
+
+### ErrorContext Reference
+
+The `ErrorContext` object passed to `on_error` callbacks provides:
+
+```python
+@dataclass
+class ErrorContext:
+    exception: BaseException       # The caught exception
+    was_suppressed: bool           # True if suppressed, False if will be raised
+    request: httpx.Request | None  # The HTTP request (when available)
+    response: httpx.Response | None # The HTTP response (HTTPStatusError only)
+
+    @property
+    def status_code(self) -> int | None:
+        """HTTP status code if available."""
+```
+
+### When Callbacks Are Invoked
+
+- **`on_error`**: Called for ALL HTTP errors (both suppressed and raised)
+  - `ctx.was_suppressed=True`: Error was suppressed (non-critical)
+  - `ctx.was_suppressed=False`: Error will be raised (critical)
+- **`on_success`**: Called when no error occurred
+- **Not called**: For non-HTTP exceptions (e.g., `ValueError`)
 
 ### Error Types Handled
 

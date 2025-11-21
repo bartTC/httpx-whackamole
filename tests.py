@@ -1,12 +1,13 @@
 """Tests for ErrorPolicy and HttpxErrorHandler."""
 
 from http import HTTPStatus
+from unittest.mock import Mock
 
 import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
-from whackamole import ErrorPolicy, HttpxWhackamole
+from whackamole import ErrorContext, ErrorPolicy, HttpxWhackamole
 
 
 def test_error_policy_default() -> None:
@@ -322,7 +323,7 @@ def test_realistic_usage_suppresses_transient_errors(httpx_mock: HTTPXMock) -> N
     with HttpxWhackamole(policy=policy) as handler:
         response = httpx.get("https://api.example.com/missing")
         response.raise_for_status()
-        if not handler.error_occurred:
+        if not handler.error_occurred:  # pragma: no cover
             result = response.json()
 
     assert handler.error_occurred
@@ -341,3 +342,191 @@ def test_realistic_usage_raises_critical_errors(httpx_mock: HTTPXMock) -> None:
     with pytest.raises(httpx.HTTPStatusError), HttpxWhackamole(policy=policy):
         response = httpx.get("https://api.example.com/protected")
         response.raise_for_status()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CALLBACK TESTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_on_error_callback_called_when_error_suppressed() -> None:
+    """Test that on_error callback is invoked when an error is suppressed."""
+    callback = Mock()
+    policy = ErrorPolicy(raise_for_status=())  # Suppress all errors
+
+    response = httpx.Response(
+        HTTPStatus.NOT_FOUND, request=httpx.Request("GET", "http://test.com")
+    )
+
+    with HttpxWhackamole(policy=policy, on_error=callback) as handler:
+        msg = "Not found"
+        raise httpx.HTTPStatusError(msg, request=response.request, response=response)
+
+    # Callback should have been called
+    callback.assert_called_once()
+
+    # Check the ErrorContext passed to callback
+    ctx: ErrorContext = callback.call_args[0][0]
+    assert isinstance(ctx.exception, httpx.HTTPStatusError)
+    assert ctx.was_suppressed is True
+    assert ctx.status_code == HTTPStatus.NOT_FOUND
+    assert ctx.request is not None
+    assert ctx.response is not None
+    assert handler.error_occurred
+
+
+def test_on_error_callback_called_when_error_raised() -> None:
+    """Test that on_error callback is invoked even when error will be raised."""
+    callback = Mock()
+    policy = ErrorPolicy.default()  # Raise all errors
+
+    response = httpx.Response(
+        HTTPStatus.NOT_FOUND, request=httpx.Request("GET", "http://test.com")
+    )
+
+    with (
+        pytest.raises(httpx.HTTPStatusError),
+        HttpxWhackamole(policy=policy, on_error=callback) as handler,
+    ):
+        msg = "Not found"
+        raise httpx.HTTPStatusError(msg, request=response.request, response=response)
+
+    # Callback should have been called even though error was raised
+    callback.assert_called_once()
+
+    # Check the ErrorContext
+    ctx: ErrorContext = callback.call_args[0][0]
+    assert ctx.was_suppressed is False  # Error was not suppressed
+    assert ctx.status_code == HTTPStatus.NOT_FOUND
+    assert not handler.error_occurred
+
+
+def test_on_success_callback_called_when_no_error() -> None:
+    """Test that on_success callback is invoked when no error occurs."""
+    callback = Mock()
+
+    with HttpxWhackamole(on_success=callback) as handler:
+        # No error
+        pass
+
+    callback.assert_called_once()
+    assert not handler.error_occurred
+
+
+def test_on_success_callback_not_called_on_error() -> None:
+    """Test that on_success callback is NOT invoked when error occurs."""
+    success_callback = Mock()
+    error_callback = Mock()
+    policy = ErrorPolicy(raise_for_status=())  # Suppress all
+
+    response = httpx.Response(
+        HTTPStatus.NOT_FOUND, request=httpx.Request("GET", "http://test.com")
+    )
+
+    with HttpxWhackamole(
+        policy=policy, on_error=error_callback, on_success=success_callback
+    ) as handler:
+        msg = "Not found"
+        raise httpx.HTTPStatusError(msg, request=response.request, response=response)
+
+    error_callback.assert_called_once()
+    success_callback.assert_not_called()
+    assert handler.error_occurred
+
+
+def test_callbacks_via_subclassing() -> None:
+    """Test that callbacks work via subclassing pattern."""
+    error_callback = Mock()
+    success_callback = Mock()
+
+    class CustomWhackamole(HttpxWhackamole):
+        def on_error(self, ctx: ErrorContext) -> None:
+            error_callback(ctx)
+
+        def on_success(self) -> None:
+            success_callback()
+
+    # Test error case
+    policy = ErrorPolicy(raise_for_status=())
+    response = httpx.Response(
+        HTTPStatus.NOT_FOUND, request=httpx.Request("GET", "http://test.com")
+    )
+
+    with CustomWhackamole(policy=policy):
+        msg = "Not found"
+        raise httpx.HTTPStatusError(msg, request=response.request, response=response)
+
+    error_callback.assert_called_once()
+    success_callback.assert_not_called()
+
+    # Reset and test success case
+    error_callback.reset_mock()
+    success_callback.reset_mock()
+
+    with CustomWhackamole():
+        pass
+
+    success_callback.assert_called_once()
+    error_callback.assert_not_called()
+
+
+def test_instance_callbacks_override_class_callbacks() -> None:
+    """Test that instance callbacks override subclass callbacks."""
+    class_error_callback = Mock()
+    instance_error_callback = Mock()
+
+    class CustomWhackamole(HttpxWhackamole):
+        def on_error(self, ctx: ErrorContext) -> None:
+            class_error_callback(ctx)  # pragma: no cover
+
+    policy = ErrorPolicy(raise_for_status=())
+    response = httpx.Response(
+        HTTPStatus.NOT_FOUND, request=httpx.Request("GET", "http://test.com")
+    )
+
+    # Pass instance callback to override class callback
+    with CustomWhackamole(policy=policy, on_error=instance_error_callback):
+        msg = "Not found"
+        raise httpx.HTTPStatusError(msg, request=response.request, response=response)
+
+    # Only instance callback should be called
+    instance_error_callback.assert_called_once()
+    class_error_callback.assert_not_called()
+
+
+def test_error_context_for_network_error() -> None:
+    """Test that ErrorContext is populated correctly for network errors."""
+    callback = Mock()
+    policy = ErrorPolicy(raise_for_status=())  # Suppress all
+
+    request = httpx.Request("GET", "http://test.com")
+
+    with HttpxWhackamole(policy=policy, on_error=callback):
+        msg = "Connection timeout"
+        raise httpx.ConnectTimeout(msg, request=request)
+
+    callback.assert_called_once()
+
+    ctx: ErrorContext = callback.call_args[0][0]
+    assert isinstance(ctx.exception, httpx.ConnectTimeout)
+    assert ctx.was_suppressed is True
+    assert ctx.request is not None
+    assert ctx.response is None  # Network errors don't have responses
+    assert ctx.status_code is None
+
+
+def test_no_callback_invoked_for_non_http_error() -> None:
+    """Test that callbacks are not invoked for non-HTTP errors."""
+    error_callback = Mock()
+    success_callback = Mock()
+
+    with (
+        pytest.raises(ValueError),  # noqa: PT011
+        HttpxWhackamole(on_error=error_callback, on_success=success_callback),
+    ):
+        msg = "Not an HTTP error"
+        raise ValueError(msg)
+
+    # Neither callback should be called for non-HTTP errors
+    error_callback.assert_not_called()
+    success_callback.assert_not_called()
