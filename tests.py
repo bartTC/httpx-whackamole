@@ -10,6 +10,18 @@ from pytest_httpx import HTTPXMock
 from whackamole import ErrorContext, ErrorPolicy, HttpxWhackamole
 
 
+def test_httpstatus_compares_to_httpx_int() -> None:
+    """
+    Verifies that an `HTTPStatus` can be compared directly to an integer in HTTPX.
+
+    This test checks the equality comparison between an `HTTPStatus` enumeration
+    value and its corresponding integer representation as used in HTTPX, ensuring
+    that they are correctly interpreted as equivalent.
+    """
+    assert HTTPStatus.NOT_FOUND == 404
+    assert HTTPStatus.NOT_FOUND.value == 404
+
+
 def test_error_policy_default() -> None:
     """Test that ErrorPolicy.default() creates the expected default policy."""
     policy = ErrorPolicy.default()
